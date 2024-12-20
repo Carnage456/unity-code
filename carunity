@@ -1,0 +1,265 @@
+using System.Collections;
+using System.Collections.Specialized;
+using System.Security.Cryptography;
+using UnityEngine;
+
+public class RobotController : MonoBehaviour
+{
+    [SerializeField] private Transform FRS;
+    [SerializeField] private Transform L1S;
+    [SerializeField] private Transform L2S;
+    [SerializeField] private Transform L3S;
+    [SerializeField] private Transform R1S;
+    [SerializeField] private Transform R2S;
+    [SerializeField] private Transform R3S;
+    [SerializeField] private Transform ORS;
+
+    [SerializeField] private WheelCollider FLC;
+    [SerializeField] private WheelCollider FRC;
+    [SerializeField] private WheelCollider RLC;
+    [SerializeField] private WheelCollider RRC;
+
+    [SerializeField] private Transform FLT;
+    [SerializeField] private Transform FRT;
+    [SerializeField] private Transform RLT;
+    [SerializeField] private Transform RRT;
+
+    [SerializeField] private Transform frontLeftVisual;
+    [SerializeField] private Transform frontRightVisual;
+    [SerializeField] private Transform rearLeftVisual;
+    [SerializeField] private Transform rearRightVisual;
+
+    [SerializeField] private Transform frontSensor;
+    [SerializeField] private Transform leftSensor1;
+    [SerializeField] private Transform leftSensor2;
+    [SerializeField] private Transform leftSensor3;
+    [SerializeField] private Transform rightSensor1;
+    [SerializeField] private Transform rightSensor2;
+    [SerializeField] private Transform rightSensor3;
+    [SerializeField] private Transform sideObstacleSensor;
+
+    private void Start()
+    {
+        rLayer = LayerMask.NameToLayer("Road");
+        SensorsToFaceForwardAndDown();
+        rb = GetComponent<Rigidbody>();
+    }
+
+    private void SensorsToFaceForwardAndDown()
+    {
+        float downAngle = 4f;
+        FRS.localRotation = Quaternion.Euler(downAngle, 0, 0);
+        L1S.localRotation = Quaternion.Euler(downAngle, -2, 0);
+        L2S.localRotation = Quaternion.Euler(downAngle, -5, 0);
+        L3S.localRotation = Quaternion.Euler(downAngle, -10, 0);
+        R1S.localRotation = Quaternion.Euler(downAngle, 2, 0);
+        R2S.localRotation = Quaternion.Euler(downAngle, 5, 0);
+        R3S.localRotation = Quaternion.Euler(downAngle, 10, 0);
+        ORS.rotation = Quaternion.Euler(downAngle, 180, 0);
+    }
+
+    private void FixedUpdate()
+    {
+        HandleSteeringAndObstacleAvoidance();
+        UpdateWheel(FLC, FLT);
+        UpdateWheel(FRC, FRT);
+        UpdateWheel(RLC, RLT);
+        UpdateWheel(RRC, RRT);
+    }
+
+    private void Forward()
+    {
+        if (rb.velocity.magnitude < maxSpeed)
+        {
+            FLC.motorTorque = motorTorque;
+            FRC.motorTorque = motorTorque;
+            RLC.motorTorque = motorTorque;
+            RRC.motorTorque = motorTorque;
+        }
+        else
+        {
+            Reverse();
+        }
+
+        if (rb.velocity.z > 0 && FLC.motorTorque > 0)
+        {
+            float nitro = 450;
+            FLC.motorTorque = nitro;
+            FRC.motorTorque = nitro;
+            RLC.motorTorque = nitro;
+            RRC.motorTorque = nitro;
+        }
+    }
+
+    private bool Wrightcheck(Transform sensor)
+    {
+        Vector3 rightDirection = sensor.TransformDirection(Quaternion.Euler(downwardAngle, 60, 0) * Vector3.forward);
+        RaycastHit hit;
+        Physics.Raycast(sensor.position, rightDirection, out hit, ORSRange, -1, QueryTriggerInteraction.Ignore);
+        if (hit.collider == null)
+        {
+            return false;
+        }
+        bool isRoad = hit.collider.gameObject.layer == rLayer || hit.collider.gameObject.layer == LayerMask.NameToLayer("Obs");
+        return isRoad;
+    }
+
+    private void HandleSteeringAndObstacleAvoidance()
+    {
+        if (IsFrontClear())
+        {
+            if (!IsLeftClear())
+            {
+                SRight();
+            }
+            if (!IsRightClear())
+            {
+                SLeft();
+            }
+            if (IsLeftClear() && IsRightClear())
+            {
+                ContinueStraight();
+            }
+            Forward();
+        }
+        else
+        {
+            if (IsLeftRoad() && !IsObstacleOnLeft())
+            {
+                SLeft();
+            }
+            else if (IsRightRoad() && !IsObstacleOnRight())
+            {
+                SRight();
+            }
+            else
+            {
+                if ((Wrightcheck(R1S) || Wrightcheck(R2S) || Wrightcheck(R3S)) && !(Wleftcheck(L1S) && Wleftcheck(L2S) && Wleftcheck(L3S)))
+                {
+                    SRight();
+                    motorTorque = 1200f;
+                }
+                else if (!(Wrightcheck(R1S) && Wrightcheck(R2S) && Wrightcheck(R3S)) && (Wleftcheck(L1S) || Wleftcheck(L2S) || Wleftcheck(L3S)))
+                {
+                    SLeft();
+                    motorTorque = 1200f;
+                }
+                else
+                {
+                    motorTorque = 10f;
+                }
+            }
+        }
+    }
+
+    private bool Wleftcheck(Transform sensor)
+    {
+        Vector3 leftDirection = sensor.TransformDirection(Quaternion.Euler(downwardAngle, -60, 0) * Vector3.forward);
+        RaycastHit hit;
+        Physics.Raycast(sensor.position, leftDirection, out hit, ORSRange, -1, QueryTriggerInteraction.Ignore);
+        if (hit.collider == null)
+        {
+            return false;
+        }
+        bool isRoad = hit.collider.gameObject.layer == rLayer || hit.collider.gameObject.layer == LayerMask.NameToLayer("Obs");
+        return isRoad;
+    }
+
+    private void SLeft()
+    {
+        FLC.steerAngle = -maxSteeringAngle;
+        FRC.steerAngle = -maxSteeringAngle;
+    }
+
+    private void SRight()
+    {
+        FLC.steerAngle = maxSteeringAngle;
+        FRC.steerAngle = maxSteeringAngle;
+    }
+
+    private void ContinueStraight()
+    {
+        FLC.steerAngle = 0;
+        FRC.steerAngle = 0;
+    }
+
+    private void Reverse()
+    {
+        FLC.motorTorque = -motorTorque;
+        FRC.motorTorque = -motorTorque;
+        RLC.motorTorque = -motorTorque;
+        RRC.motorTorque = -motorTorque;
+    }
+
+    private bool IsFrontClear()
+    {
+        return IsRoad(FRS);
+    }
+
+    private bool IsRightRoad()
+    {
+        return IsRoad(R1S) || IsRoad(R2S) || IsRoad(R3S);
+    }
+
+    private void UpdateWheel(WheelCollider collider, Transform transform)
+    {
+        Vector3 pos;
+        Quaternion rot;
+        collider.GetWorldPose(out pos, out rot);
+        transform.position = pos;
+        transform.rotation = rot;
+    }
+
+    private bool IsRoad(Transform sensor)
+    {
+        RaycastHit hit;
+        Physics.Raycast(sensor.position, sensor.forward, out hit, sensorRange, -1, QueryTriggerInteraction.Ignore);
+        if (hit.collider == null)
+        {
+            return false;
+        }
+        bool isRoad = hit.collider.gameObject.layer == rLayer;
+        return isRoad;
+    }
+
+    private bool IsObstacleOnLeft()
+    {
+        return CheckObstacle(L1S) || CheckObstacle(L2S) || CheckObstacle(L3S);
+    }
+
+    private bool IsObstacleOnRight()
+    {
+        return CheckObstacle(R1S) || CheckObstacle(R2S) || CheckObstacle(R3S) || CheckObstacle(ORS);
+    }
+
+    private bool CheckObstacle(Transform sensor)
+    {
+        RaycastHit hit;
+        bool isObstacle = Physics.Raycast(sensor.position, sensor.forward, out hit, sensorRange) && hit.collider.gameObject.layer == LayerMask.NameToLayer("Obs");
+        return isObstacle;
+    }
+
+    private bool IsRightClear()
+    {
+        return IsRoad(R1S) && IsRoad(R2S) && IsRoad(R3S);
+    }
+
+    private bool IsLeftClear()
+    {
+        return IsRoad(L1S) && IsRoad(L2S) && IsRoad(L3S);
+    }
+
+    private bool IsLeftRoad()
+    {
+        return IsRoad(L1S) || IsRoad(L2S) || IsRoad(L3S);
+    }
+
+    private float sensorRange = 30f;
+    private float motorTorque = 50f;
+    private float maxSteeringAngle = 30;
+    private float maxSpeed = 10f;
+    private Rigidbody rb;
+    private int rLayer;
+    private float downwardAngle = 2f;
+    private float ORSRange = 20f;
+}
